@@ -1,0 +1,7 @@
+- name: Init
+  hosts: all
+  become: true
+  gather_facts: yes
+  roles:
+    - postgres
+  

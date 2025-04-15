@@ -1,0 +1,53 @@
+- name: Install PostgreSQL 
+  apt:
+    name: postgresql
+    state: present
+
+- name: Install psycopg2 (Python PostgreSQL adapter)
+  pip:
+   name: psycopg2-binary 
+   state: present
+
+- name: Start and enable PostgreSQL 
+  sysvinit:
+    name: "postgresql"
+    state: started
+    enabled: true
+
+- name: Get PostgreSQL version
+  shell: |
+    ls /etc/postgresql/ | head -n 1
+  register: pg_version
+  changed_when: false
+
+- name: Create db 
+  community.postgresql.postgresql_db:
+    name: db
+    state: present  
+  become: true
+  become_user: postgres
+
+- name: Add student access 
+  lineinfile:
+   path: /etc/postgresql/{{ pg_version.stdout }}/main/pg_hba.conf
+   line: "host    all             student         {{ student_ip }}/32        md5"
+   state: present
+
+- name: Enable connections 
+  lineinfile:
+   path: /etc/postgresql/{{ pg_version.stdout }}/main/postgresql.conf
+   line: "listen_addresses = '*'"
+   state: present
+
+- name: Restart PostgreSQL
+  sysvinit:
+   name: postgresql
+   state: restarted
+  
+- name: Test
+  community.postgresql.postgresql_query:
+    query: "SELECT 1 FROM pg_database WHERE datname = 'db'"
+  register: db_exists
+  become: true
+  become_user: postgres
+  changed_when: false  

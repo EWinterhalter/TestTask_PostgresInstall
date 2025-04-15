@@ -1,0 +1,96 @@
+- name: Import a GPG key 
+  ansible.builtin.rpm_key:
+     state: present
+     key: https://download.postgresql.org/pub/repos/yum/keys/PGDG-RPM-GPG-KEY-RHEL
+
+- name: Add PostgreSQL repo
+  ansible.builtin.yum:
+    name: "https://download.postgresql.org/pub/repos/yum/reporpms/\
+    EL-{{ ansible_distribution_major_version }}-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+    state: present
+
+- name: Disable original postgresql dnf
+  ansible.builtin.blockinfile:
+     path: /etc/dnf/modules.d/postgresql.module
+     create: yes
+     block: |
+      [postgresql]
+      name=postgresql
+      profiles=
+      state=disabled
+      stream=
+     mode: 0644
+
+- name: Install PostgreSQL server
+  ansible.builtin.yum:
+    name: postgresql13-server
+    state: present
+
+- name: Install pip
+  become: yes
+  package:
+    name:
+      - python3
+      - python3-pip
+    state: present
+
+- name: Enable 'packaging' module 
+  become: yes
+  pip:
+    name: packaging
+    state: present
+
+- name: Install psycopg2 (Python PostgreSQL adapter)
+  pip:
+   name: psycopg2-binary 
+   state: present
+
+- name: Get PostgreSQL version
+  shell: "psql --version | grep -oP '\\d+' | head -n1"
+  register: pg_version
+  changed_when: false
+
+- name: Init PostgreSQL
+  command: "/usr/pgsql-{{ pg_version.stdout }}/bin/postgresql-{{ pg_version.stdout }}-setup initdb"
+  args:
+    creates: "/var/lib/pgsql/{{ pg_version.stdout }}/data/PG_VERSION"
+
+- name: Start PostgreSQL
+  service:
+    name: "postgresql-{{ pg_version.stdout }}"
+    state: started
+    enabled: true
+
+- name: Create db
+  community.postgresql.postgresql_db:
+    name: db
+    state: present  
+  become: true
+  become_user: postgres
+
+- name: Enable external connections (listen_addresses)
+  lineinfile:
+    path: /var/lib/pgsql/{{ pg_version.stdout }}/data/postgresql.conf
+    regexp: '^#?listen_addresses\s*='
+    line: "listen_addresses = '*'"
+    state: present
+    backrefs: yes
+
+- name: Add student user access 
+  lineinfile:
+   path: /var/lib/pgsql/{{ pg_version.stdout }}/data/pg_hba.conf
+   line: "host    all             student         {{ student_ip }}/32        scram-sha-256"
+   state: present
+
+- name: Restart PostgreSQL
+  service:
+   name: "postgresql-{{ pg_version.stdout }}"
+   state: restarted
+
+- name: Test
+  community.postgresql.postgresql_query:
+    query: "SELECT 1 FROM pg_database WHERE datname = 'db'"
+  register: db_exists
+  become: true
+  become_user: postgres
+  changed_when: false
